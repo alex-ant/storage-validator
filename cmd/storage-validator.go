@@ -23,6 +23,7 @@ func main() {
 		log.Fatalf("failed to init hasher client: %v", hasherErr)
 	}
 
+	// Run selected hasher mode.
 	switch *config.Mode {
 	case "init":
 		initErr := hasher.Init()
@@ -30,8 +31,13 @@ func main() {
 			log.Fatalf("failed to init directory: %v", initErr)
 		}
 	case "validate":
-
+		validateErr := hasher.Validate()
+		if validateErr != nil {
+			log.Fatalf("failed to validate directory: %v", validateErr)
+		}
 	case "reset":
 		hasher.Reset()
+	default:
+		log.Fatal("invalid mode")
 	}
 }

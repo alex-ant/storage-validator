@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -71,7 +73,7 @@ func New(dir string) (*Client, error) {
 func (c *Client) Init() error {
 	// Check if data file already exists.
 	if c.dataFileExists {
-		return fmt.Errorf("the directory %s has already been initialized, use reset mode to reset storage validator state", c.wd)
+		return fmt.Errorf("directory %s has already been initialized, use reset mode to reset storage validator state", c.wd)
 	}
 
 	// Open data file.
@@ -84,7 +86,7 @@ func (c *Client) Init() error {
 	gzipDataFW := gzip.NewWriter(dataF)
 	gzipDataFWBuf := bufio.NewWriter(gzipDataFW)
 
-	// Close result file and buffers after the execution.
+	// Close data file and buffers after the execution.
 	defer dataF.Close()
 	defer gzipDataFW.Close()
 	defer gzipDataFWBuf.Flush()
@@ -120,6 +122,7 @@ func (c *Client) Init() error {
 			// Use relative path.
 			relPath := path[len(c.wd)+1:]
 
+			// Write to data file.
 			_, csWErr := gzipDataFWBuf.Write([]byte(fmt.Sprintf("%s:%s\n", relPath, checksum)))
 			if csWErr != nil {
 				return fmt.Errorf("failed to write checksum for file %s: %v", path, csWErr)
@@ -129,6 +132,75 @@ func (c *Client) Init() error {
 		})
 	if walkErr != nil {
 		return fmt.Errorf("failed to get contents of %s: %v", c.wd, walkErr)
+	}
+
+	return nil
+}
+
+// Validate validates directory files against previously stored checksum.
+func (c *Client) Validate() error {
+	// Check if data file already exists.
+	if !c.dataFileExists {
+		return fmt.Errorf("directory %s has not been initialized, use init mode first", c.wd)
+	}
+
+	// Init gzip and file readers.
+	gzipF, gzipFErr := os.Open(c.dataFile)
+	if gzipFErr != nil {
+		return fmt.Errorf("failed to open data file: %v", gzipFErr)
+	}
+
+	gzipReader, gzipReaderErr := gzip.NewReader(gzipF)
+	if gzipReaderErr != nil {
+		return fmt.Errorf("failed to init gzip reader on file %s: %v", c.dataFile, gzipReaderErr)
+	}
+
+	// Close data file and buffers after the execution.
+	defer gzipReader.Close()
+	defer gzipF.Close()
+
+	// Read data file line by line.
+	var lineNum int = 1
+	scanner := bufio.NewScanner(gzipReader)
+	for scanner.Scan() {
+		// Extract recorded filepath and checksum.
+		line := scanner.Text()
+		lineSl := strings.Split(line, ":")
+		if len(lineSl) < 2 {
+			return fmt.Errorf("corrupted data file %s, line %d: %s", c.dataFile, lineNum, line)
+		}
+
+		recordedChecksum := lineSl[len(lineSl)-1]
+		recordedFilepath := strings.Join(lineSl[:len(lineSl)-1], ":")
+
+		// Check if file exists.
+		fullPath := path.Join(c.wd, recordedFilepath)
+
+		e, eErr := exists(fullPath)
+		if eErr != nil {
+			return fmt.Errorf("failed to check whether file %s exists: %v", recordedFilepath, eErr)
+		}
+
+		if !e {
+			return fmt.Errorf("file %s doesn't exist", recordedFilepath)
+		}
+
+		// Validate file.
+		realChecksum, realChecksumErr := fileHash(fullPath)
+		if realChecksumErr != nil {
+			return fmt.Errorf("failed to get checksum for file %s: %v", fullPath, realChecksumErr)
+		}
+
+		if realChecksum != recordedChecksum {
+			return fmt.Errorf("checksum mismatch for file %s", fullPath)
+		}
+
+		// Increase line number.
+		lineNum++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("scanner error reading file %s: %v", c.dataFile, err)
 	}
 
 	return nil
