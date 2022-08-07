@@ -1,5 +1,5 @@
 # storage-validator
-Generate and validate directory checksum against all nested files
+Backup validator - generates and validates files' checksums in a specified directory
 
 ### Execution flags
 
