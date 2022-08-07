@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -91,8 +92,45 @@ func (c *Client) Init() error {
 	defer gzipDataFW.Close()
 	defer gzipDataFWBuf.Flush()
 
-	// List files to encrypt.
+	// Count files.
+	var filesNumber int64
+
 	walkErr := filepath.Walk(
+		c.wd,
+		func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+
+			if info.IsDir() {
+				return nil
+			}
+
+			// Trim path.
+			if path[len(path)-1] == '/' {
+				path = path[:len(path)-1]
+			}
+
+			// Ignore storage validator files.
+			if len(path) == 0 || path == c.wd || path == c.dataDir || path == c.dataFile {
+				return nil
+			}
+
+			filesNumber++
+
+			return nil
+		})
+	if walkErr != nil {
+		return fmt.Errorf("failed to get contents of %s: %v", c.wd, walkErr)
+	}
+
+	log.Printf("processing %d files", filesNumber)
+
+	// List files to encrypt.
+	var filesProcessed int64
+	var prevPerc int
+
+	walkErr = filepath.Walk(
 		c.wd,
 		func(path string, info os.FileInfo, err error) error {
 			if err != nil {
@@ -128,10 +166,23 @@ func (c *Client) Init() error {
 				return fmt.Errorf("failed to write checksum for file %s: %v", path, csWErr)
 			}
 
+			filesProcessed++
+
+			// Print progress.
+			pPerc := int(filesProcessed * 100 / filesNumber)
+			if pPerc != prevPerc {
+				log.Printf("%d%%", pPerc)
+				prevPerc = pPerc
+			}
+
 			return nil
 		})
 	if walkErr != nil {
 		return fmt.Errorf("failed to get contents of %s: %v", c.wd, walkErr)
+	}
+
+	if prevPerc != 100 {
+		log.Print("100%")
 	}
 
 	return nil
@@ -139,6 +190,12 @@ func (c *Client) Init() error {
 
 // Validate validates directory files against previously stored checksum.
 func (c *Client) Validate() error {
+	// Get expected files number.
+	en, enErr := c.dataFileLines()
+	if enErr != nil {
+		return fmt.Errorf("failed to get expected files number: %v", enErr)
+	}
+
 	// Check if data file already exists.
 	if !c.dataFileExists {
 		return fmt.Errorf("directory %s has not been initialized, use init mode first", c.wd)
@@ -161,6 +218,8 @@ func (c *Client) Validate() error {
 
 	// Read data file line by line.
 	var lineNum int = 1
+	var prevPerc int
+
 	scanner := bufio.NewScanner(gzipReader)
 	for scanner.Scan() {
 		// Extract recorded filepath and checksum.
@@ -195,15 +254,61 @@ func (c *Client) Validate() error {
 			return fmt.Errorf("checksum mismatch for file %s", fullPath)
 		}
 
+		// Print progress.
+		pPerc := int(int64(lineNum) * 100 / en)
+		if pPerc != prevPerc {
+			log.Printf("%d%%", pPerc)
+			prevPerc = pPerc
+		}
+
 		// Increase line number.
 		lineNum++
 	}
 
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("scanner error reading file %s: %v", c.dataFile, err)
+		return fmt.Errorf("scanner error reading data file %s: %v", c.dataFile, err)
+	}
+
+	if prevPerc != 100 {
+		log.Print("100%")
 	}
 
 	return nil
+}
+
+func (c *Client) dataFileLines() (int64, error) {
+	// Check if data file already exists.
+	if !c.dataFileExists {
+		return 0, fmt.Errorf("directory %s has not been initialized, use init mode first", c.wd)
+	}
+
+	// Init gzip and file readers.
+	gzipF, gzipFErr := os.Open(c.dataFile)
+	if gzipFErr != nil {
+		return 0, fmt.Errorf("failed to open data file: %v", gzipFErr)
+	}
+
+	gzipReader, gzipReaderErr := gzip.NewReader(gzipF)
+	if gzipReaderErr != nil {
+		return 0, fmt.Errorf("failed to init gzip reader on file %s: %v", c.dataFile, gzipReaderErr)
+	}
+
+	// Close data file and buffers after the execution.
+	defer gzipReader.Close()
+	defer gzipF.Close()
+
+	// Read data file line by line.
+	var lineNum int64
+	scanner := bufio.NewScanner(gzipReader)
+	for scanner.Scan() {
+		lineNum++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return 0, fmt.Errorf("scanner error reading data file %s: %v", c.dataFile, err)
+	}
+
+	return lineNum, nil
 }
 
 // Reset removes storage validator data directory.
