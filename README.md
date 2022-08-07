@@ -1,6 +1,13 @@
 # storage-validator
 Generate and validate directory checksum against all nested files
 
+### Execution flags
+
+|Flag|Env. variable|Default value|Description|
+|:----|:----|:---|:---|
+|d|D||Working directory path|
+|m|M||Operation mode (init/validate/reset)|
+
 ### Usage
 
 Init directory:  

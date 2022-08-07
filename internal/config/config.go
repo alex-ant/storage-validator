@@ -12,7 +12,7 @@ const (
 )
 
 var (
-	Mode      = flag.String("m", "", "operation mode (init/validate/reset)")
+	Mode      = flag.String("m", "", "Operation mode (init/validate/reset)")
 	Directory = flag.String("d", "", "Working directory path")
 )
 
