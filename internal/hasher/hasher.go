@@ -196,6 +196,8 @@ func (c *Client) Validate() error {
 		return fmt.Errorf("failed to get expected files number: %v", enErr)
 	}
 
+	log.Printf("validating %d files", en)
+
 	// Check if data file already exists.
 	if !c.dataFileExists {
 		return fmt.Errorf("directory %s has not been initialized, use init mode first", c.wd)
