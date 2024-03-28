@@ -18,6 +18,17 @@ const (
 	validatorDataFile = "data"
 )
 
+var filesToIgnore = []string{".DS_Store"}
+
+func ignoreFile(name string) bool {
+	for i := 0; i < len(filesToIgnore); i++ {
+		if name == filesToIgnore[i] {
+			return true
+		}
+	}
+	return false
+}
+
 type Client struct {
 	dataDir  string
 	dataFile string
@@ -233,6 +244,11 @@ func (c *Client) Validate() error {
 
 		recordedChecksum := lineSl[len(lineSl)-1]
 		recordedFilepath := strings.Join(lineSl[:len(lineSl)-1], ":")
+
+		// Check if the file shuld be ignored.
+		if ignoreFile(path.Base(recordedFilepath)) {
+			continue
+		}
 
 		// Check if file exists.
 		fullPath := path.Join(c.wd, recordedFilepath)
